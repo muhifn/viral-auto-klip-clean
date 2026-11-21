@@ -122,8 +122,8 @@ SCHEMA: List[Dict] = [
     {"key": "YOUTUBE_CLIENT_SECRET_FILE", "group": "Upload", "label": "File client_secret.json YouTube", "type": "path"},
     {"key": "TIKTOK_COOKIES_FILE", "group": "Upload", "label": "File cookies.txt TikTok", "type": "path"},
     {"key": "TIKTOK_UPLOAD_MODE", "group": "Upload", "label": "Mode upload TikTok", "type": "enum", "options": ["draft", "post"],
-     "labels": {"draft": "Simpan sebagai draf (review dulu)", "post": "Langsung posting"},
-     "help": "Draf masuk ke TikTok Studio → Konten → Draf; bisa diedit & diposting manual kapan saja."},
+     "labels": {"draft": "Privat — Only you (review dulu)", "post": "Langsung posting (publik)"},
+     "help": "TikTok Studio web tidak punya tombol draf: mode privat memposting dengan visibilitas 'Only you' — bisa diedit lalu dipublikasikan kapan saja."},
     {"key": "YTDLP_COOKIES", "group": "Upload", "label": "Cookies untuk download (yt-dlp)", "type": "path", "help": "Opsional, untuk video yang butuh login"},
     # --- Lanjutan
     {"key": "ANTHROPIC_EFFORT", "group": "Lanjutan", "label": "Ketelitian Claude", "type": "enum", "options": ["low", "medium", "high", "xhigh", "max"],

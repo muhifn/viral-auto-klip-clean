@@ -44,15 +44,6 @@ POST_SELECTORS = (
     'button:has-text("Unggah")',
     'button:has-text("Upload")',
 )
-SAVE_DRAFT_SELECTORS = (
-    'button[data-e2e="save_draft_button"]',
-    'button[data-e2e="draft_button"]',
-    'button:has-text("Simpan draf")',
-    'button:has-text("Simpan sebagai draf")',
-    'button:has-text("Save draft")',
-    'button:has-text("Save as draft")',
-    'button:has-text("Draf")',
-)
 
 
 class TikTokUploadError(ValueError):
@@ -187,11 +178,58 @@ def _first(page, selectors, *, state="visible", timeout=8000):
     return None
 
 
+def _dismiss_overlay(page) -> None:
+    """Tutup dialog tutorial TikTok Studio (react-joyride) yang menutupi tombol."""
+    for sel in ('button:has-text("Got it")', 'button:has-text("Mengerti")',
+                '#react-joyride-portal button'):
+        try:
+            loc = page.locator(sel).first
+            if loc.count() and loc.is_visible(timeout=800):
+                loc.click(force=True, timeout=2000)
+                page.wait_for_timeout(400)
+                return
+        except Exception:  # noqa: BLE001
+            continue
+
+
+def _set_visibility_only_you(page) -> bool:
+    """Pilih 'Only you' di 'Who can see this post' — padanan draf di TikTok Studio web.
+
+    TikTok Studio web tidak punya tombol 'Simpan draf' dan menutup halaman tidak
+    menyimpan draf. Posting dengan visibilitas 'Only you' membuat video privat:
+    bisa diedit lalu dipublikasikan kapan saja.
+    """
+    opened = page.evaluate(
+        """() => {
+            const els = Array.from(document.querySelectorAll('button, [role=combobox], [role=button]'));
+            const ok = (e) => {
+                const t = (e.innerText || '').trim();
+                return (t === 'Everyone' || t.startsWith('Friends')) && e.offsetParent;
+            };
+            const el = els.find(ok);
+            if (el) { el.click(); return true; }
+            return false;
+        }""")
+    if not opened:
+        return False
+    page.wait_for_timeout(1000)
+    picked = page.evaluate(
+        """() => {
+            const els = Array.from(document.querySelectorAll('[role=option], [role=menuitem], [role=menuitemradio], li'));
+            const el = els.find(e => /^(only you|only me|hanya kamu|hanya saya)$/i.test((e.innerText || '').trim()));
+            if (el) { el.click(); return true; }
+            return false;
+        }""")
+    page.wait_for_timeout(700)
+    return bool(picked)
+
+
 def upload_video(video: Path | str, *, description: str = "", timeout: int = 300,
                  progress=None, mode: Optional[str] = None) -> Dict[str, Any]:
     """Upload satu video ke TikTok Studio (headless). Tidak pernah membuka jendela.
 
-    mode: "draft" (default — simpan ke Draf TikTok Studio) atau "post" (langsung posting).
+    mode "draft" (default): posting dengan visibilitas "Only you" (privat, bisa
+    diedit & dipublikasikan nanti). mode "post": posting dengan visibilitas default akun.
     """
     mode = str(mode or getattr(config, "TIKTOK_UPLOAD_MODE", "draft") or "draft").strip().lower()
     if mode not in ("draft", "post"):
@@ -229,6 +267,7 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
             page = context.new_page()
             page.goto(UPLOAD_URL, wait_until="domcontentloaded", timeout=60_000)
             page.wait_for_timeout(5000)
+            _dismiss_overlay(page)
 
             if "/login" in page.url or page.locator('text="Log in"').count():
                 if "/login" in page.url:
@@ -243,9 +282,13 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
 
             say("Upload", 40, "Menunggu editor caption…")
             editor = _first(page, CAPTION_SELECTORS, timeout=60_000)
+            _dismiss_overlay(page)
             if editor is not None and description:
                 try:
-                    editor.click()
+                    try:
+                        editor.click(timeout=3000)
+                    except Exception:  # noqa: BLE001 - overlay menutupi editor
+                        editor.evaluate("el => el.focus()")
                     page.keyboard.press("Control+A")
                     page.keyboard.press("Backspace")
                     page.keyboard.insert_text(trim_caption(description, 2000))
@@ -253,10 +296,9 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
                     pass
 
             say("Upload", 60, "Menunggu video selesai diproses…")
-            target = SAVE_DRAFT_SELECTORS if mode == "draft" else POST_SELECTORS
             action_btn = None
             while time.monotonic() < deadline:
-                action_btn = _first(page, target, timeout=3000)
+                action_btn = _first(page, POST_SELECTORS, timeout=3000)
                 if action_btn is not None:
                     try:
                         disabled = action_btn.get_attribute("disabled") is not None or \
@@ -268,47 +310,60 @@ def upload_video(video: Path | str, *, description: str = "", timeout: int = 300
                 page.wait_for_timeout(2000)
 
             if action_btn is None:
-                if mode == "draft":
-                    raise TikTokUploadError(
-                        "Tombol Simpan draf tidak ditemukan — UI TikTok mungkin berubah. "
-                        "Ubah Pengaturan → Mode upload TikTok ke 'post' untuk langsung posting.")
                 raise TikTokUploadError("Tombol Post tidak muncul — UI TikTok mungkin berubah")
 
-            say("Upload", 80, "Menyimpan ke Draf…" if mode == "draft" else "Menekan Post…")
+            if mode == "draft":
+                say("Upload", 75, "Mengatur visibilitas: Only you (privat)…")
+                if not _set_visibility_only_you(page):
+                    say("Upload", 76, "Opsi 'Only you' tidak ditemukan — memakai visibilitas default akun")
+
+            say("Upload", 80, "Menekan Post…")
             try:
                 action_btn.click(timeout=5000)
             except Exception:  # noqa: BLE001
                 action_btn.evaluate("el => el.click()")
 
-            # Tunggu konfirmasi: URL pindah ke halaman konten, atau muncul teks sukses.
+            # TikTok bisa menampilkan dialog "Continue to post?" saat copyright check
+            # belum selesai — tekan "Post now", BUKAN "Cancel".
+            posted_dialog = False
+            for _ in range(12):
+                page.wait_for_timeout(1000)
+                if "tiktokstudio/content" in page.url or "upload" not in page.url:
+                    break
+                for sel in ('button:has-text("Post now")', 'button:has-text("Post Now")',
+                            'button:has-text("Posting sekarang")', 'button:has-text("Tetap posting")'):
+                    loc = page.locator(sel).first
+                    try:
+                        if loc.count() and loc.is_visible(timeout=400):
+                            say("Upload", 85, "Konfirmasi dialog copyright check (Post now)…")
+                            try:
+                                loc.click(timeout=3000)
+                            except Exception:  # noqa: BLE001
+                                loc.evaluate("el => el.click()")
+                            posted_dialog = True
+                            break
+                    except Exception:  # noqa: BLE001
+                        continue
+                if posted_dialog:
+                    break
+
+            # Sukses hanya bila URL pindah ke halaman Konten (indikator paling andal).
             uploaded = False
-            confirm = r"draf|draft|tersimpan|saved" if mode == "draft" else r"uploaded|berhasil|success"
-            for _ in range(60):
+            for _ in range(90):
                 if time.monotonic() > deadline:
                     break
                 if "tiktokstudio/content" in page.url or "upload" not in page.url:
                     uploaded = True
                     break
-                try:
-                    if page.locator(f"text=/{confirm}/i").count():
-                        uploaded = True
-                        break
-                except Exception:  # noqa: BLE001
-                    pass
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(1000)
 
             if not uploaded:
-                if mode == "draft":
-                    # Draf kadang tersimpan tanpa memunculkan teks konfirmasi — jangan
-                    # gagalkan jadwal; minta pengguna mengecek TikTok Studio → Draf.
-                    logger.warning("[tiktok-browser] Draf tidak terkonfirmasi — cek TikTok Studio → Konten → Draf")
-                    return {"ok": True, "mode": "draft", "confirmed": False,
-                            "privacy": "default", "description": description, "file": str(video)}
                 raise TikTokUploadError(
-                    "Post ditekan tetapi konfirmasi tidak terlihat. Cek TikTok Studio → Konten.")
-            say("Upload", 100, "Draf TikTok tersimpan" if mode == "draft" else "Upload TikTok selesai")
-            return {"ok": True, "mode": mode, "privacy": "default", "description": description,
-                    "file": str(video)}
+                    "Post belum terkonfirmasi (masih di halaman upload). Cek TikTok Studio → Konten.")
+            say("Upload", 100, "TikTok selesai (privat/Only you)" if mode == "draft" else "Upload TikTok selesai")
+            return {"ok": True, "mode": mode,
+                    "privacy": "only_you" if mode == "draft" else "default",
+                    "description": description, "file": str(video)}
         except TikTokUploadError:
             raise
         except Exception as exc:  # noqa: BLE001

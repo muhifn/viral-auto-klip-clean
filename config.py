@@ -492,7 +492,7 @@ YOUTUBE_OAUTH_TOKEN_FILE = ".yt_upload_token.json"  # tersimpan di BASE_DIR (jan
 CAMPAIGN_DEFAULT_PRESET = os.getenv("CAMPAIGN_DEFAULT_PRESET", "motion-klip-gtavi-split.json")
 TIKTOK_UPLOADER_PATH = os.getenv("TIKTOK_UPLOADER_PATH", "")  # opsional, path ke executable tiktok-uploader
 TIKTOK_COOKIES_FILE = os.getenv("TIKTOK_COOKIES_FILE", "")    # cookies.txt sesi TikTok untuk tiktok-uploader
-# draft = simpan ke Draf TikTok Studio (review & posting manual), post = langsung posting
+# draft = posting privat (Only you, bisa dipublikasikan nanti), post = langsung posting
 TIKTOK_UPLOAD_MODE = os.getenv("TIKTOK_UPLOAD_MODE", "draft").strip().lower()
 
 # ==================== STUDIO v6: media AI ====================
