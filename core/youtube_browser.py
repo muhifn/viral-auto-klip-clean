@@ -292,6 +292,25 @@ def upload_video(video: Path | str, *, title: str, description: str = "",
                 except Exception:  # noqa: BLE001 - tag opsional
                     pass
 
+            # YouTube mewajibkan jawaban "Dibuat untuk Anak-Anak?" sebelum Next aktif.
+            # Sama dengan API (selfDeclaredMadeForKids=False): bukan untuk anak-anak.
+            say("Upload", 55, "Menjawab 'Dibuat untuk Anak-Anak?' (Tidak)…")
+            try:
+                mfk = page.locator('tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_NOT_MFK"]').first
+                if mfk.count():
+                    mfk.evaluate("el => el.click()")
+                else:
+                    page.evaluate(
+                        """() => {
+                            const els = Array.from(document.querySelectorAll('tp-yt-paper-radio-button'));
+                            const el = els.find(e => /tidak, video ini tidak dibuat untuk anak-anak|no,? it.s not made for kids/i.test((e.innerText || '').trim()));
+                            if (el) { el.click(); return true; }
+                            return false;
+                        }""")
+                page.wait_for_timeout(600)
+            except Exception:  # noqa: BLE001 - pertanyaan opsional bila UI berubah
+                pass
+
             # Wizard: klik Next sampai halaman visibility
             for step in range(3):
                 if time.monotonic() > deadline:
@@ -302,7 +321,7 @@ def upload_video(video: Path | str, *, title: str, description: str = "",
                     page.wait_for_function(
                         """() => { const n = document.querySelector('#next-button');
                                    return n && !n.hasAttribute('disabled'); }""",
-                        timeout=90_000)
+                        timeout=600_000)
                     nxt.evaluate("el => el.click()")
                     page.wait_for_timeout(1200)
                 except Exception:  # noqa: BLE001
@@ -324,7 +343,7 @@ def upload_video(video: Path | str, *, title: str, description: str = "",
             page.wait_for_function(
                 """() => { const d = document.querySelector('#done-button');
                            return d && !d.hasAttribute('disabled') && d.offsetParent !== null; }""",
-                timeout=120_000)
+                timeout=1_800_000)
             page.locator("#done-button").first.evaluate("el => el.click()")
             page.wait_for_timeout(6000)
 
